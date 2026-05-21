@@ -1,7 +1,6 @@
 import streamlit as st
 import tensorflow as tf
 import numpy as np
-import cv2
 import matplotlib.pyplot as plt
 
 from tensorflow.keras.preprocessing import image
@@ -126,7 +125,11 @@ class_names = [
     'SeaLake'
 ]
 
-IMG_SIZE = 224
+# =========================================================
+# IMAGE SIZE
+# =========================================================
+
+IMG_SIZE = 128
 
 # =========================================================
 # HEADER
@@ -159,76 +162,29 @@ uploaded_file = st.file_uploader(
 
 def predict_image(img):
 
+    # Resize image
     img = img.resize((IMG_SIZE, IMG_SIZE))
 
+    # Convert to array
     img_array = image.img_to_array(img)
 
+    # Expand dimensions
     img_array = np.expand_dims(img_array, axis=0)
 
+    # Normalize
     img_array = img_array / 255.0
 
-    prediction = model.predict(img_array)
+    # Predict
+    prediction = model.predict(
+        img_array,
+        verbose=0
+    )
 
     predicted_class = class_names[np.argmax(prediction)]
 
     confidence = np.max(prediction) * 100
 
-    return prediction, predicted_class, confidence, img_array
-
-# =========================================================
-# GRAD-CAM FUNCTION
-# =========================================================
-
-def generate_gradcam(img_array):
-
-    # Get base MobileNetV2 model
-    base_model = model.layers[0]
-
-    # Last convolution layer
-    last_conv_layer = base_model.get_layer("out_relu")
-
-    # Create Grad-CAM model
-    grad_model = tf.keras.models.Model(
-        inputs=model.inputs,
-        outputs=[
-            last_conv_layer.output,
-            model.output
-        ]
-    )
-
-    # Compute gradients
-    with tf.GradientTape() as tape:
-
-        conv_outputs, predictions = grad_model(img_array)
-
-        pred_index = tf.argmax(predictions[0])
-
-        class_channel = predictions[:, pred_index]
-
-    # Get gradients
-    grads = tape.gradient(class_channel, conv_outputs)
-
-    # Mean intensity of gradients
-    pooled_grads = tf.reduce_mean(
-        grads,
-        axis=(0, 1, 2)
-    )
-
-    # Feature map
-    conv_outputs = conv_outputs[0]
-
-    # Heatmap
-    heatmap = tf.reduce_sum(
-        tf.multiply(pooled_grads, conv_outputs),
-        axis=-1
-    )
-
-    # Normalize heatmap
-    heatmap = np.maximum(heatmap, 0)
-
-    heatmap = heatmap / tf.math.reduce_max(heatmap)
-
-    return heatmap.numpy()
+    return prediction, predicted_class, confidence
 
 # =========================================================
 # MAIN APP
@@ -239,6 +195,7 @@ if uploaded_file is not None:
     # Safe image loading
     img = Image.open(uploaded_file).convert("RGB")
 
+    # Create columns
     col1, col2 = st.columns([1,1])
 
     # =====================================================
@@ -250,7 +207,7 @@ if uploaded_file is not None:
         st.image(
             img,
             caption="Uploaded Satellite Image",
-            width=400
+            width=350
         )
 
     # =====================================================
@@ -259,7 +216,9 @@ if uploaded_file is not None:
 
     with col2:
 
-        prediction, predicted_class, confidence, img_array = predict_image(img)
+        with st.spinner("Predicting Image..."):
+
+            prediction, predicted_class, confidence = predict_image(img)
 
         st.markdown(
             '<div class="prediction-card">',
@@ -287,7 +246,7 @@ if uploaded_file is not None:
 
     confidence_scores = prediction[0] * 100
 
-    fig, ax = plt.subplots(figsize=(12,5))
+    fig, ax = plt.subplots(figsize=(8,4))
 
     ax.bar(class_names, confidence_scores)
 
@@ -298,61 +257,6 @@ if uploaded_file is not None:
     plt.title("Prediction Confidence Scores")
 
     st.pyplot(fig)
-
-    # =====================================================
-    # GRAD-CAM HEATMAP
-    # =====================================================
-
-    st.subheader("Grad-CAM Heatmap")
-
-    try:
-
-        heatmap = generate_gradcam(img_array)
-
-        # Original image
-        original = np.array(
-            img.resize((IMG_SIZE, IMG_SIZE))
-        )
-
-        # Resize heatmap
-        heatmap = cv2.resize(
-            heatmap,
-            (IMG_SIZE, IMG_SIZE)
-        )
-
-        # Convert heatmap
-        heatmap = np.uint8(255 * heatmap)
-
-        # Apply color map
-        heatmap = cv2.applyColorMap(
-            heatmap,
-            cv2.COLORMAP_JET
-        )
-
-        # Overlay
-        superimposed_img = heatmap * 0.4 + original
-
-        # Display
-        fig2, ax2 = plt.subplots(figsize=(7,7))
-
-        ax2.imshow(
-            cv2.cvtColor(
-                np.uint8(superimposed_img),
-                cv2.COLOR_BGR2RGB
-            )
-        )
-
-        ax2.axis("off")
-
-        st.pyplot(fig2)
-
-    except Exception as e:
-
-        st.error(
-            "Grad-CAM visualization could not be generated."
-        )
-
-        st.text(str(e))
 
 # =========================================================
 # SIDEBAR
@@ -366,7 +270,7 @@ st.sidebar.markdown("""
 ✅ Satellite Image Classification  
 ✅ Deep Learning Prediction  
 ✅ Confidence Score  
-✅ Grad-CAM Heatmap  
+✅ Confidence Graph  
 ✅ MobileNetV2 Transfer Learning  
 
 ---
@@ -381,7 +285,6 @@ EuroSAT RGB Dataset
 
 - TensorFlow
 - Streamlit
-- OpenCV
 - MobileNetV2
 - Matplotlib
 
