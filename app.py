@@ -35,7 +35,7 @@ st.markdown("""
     color: white;
 }
 
-/* Title */
+/* Main Title */
 
 .main-title {
     font-size: 50px;
@@ -104,7 +104,13 @@ section[data-testid="stSidebar"] {
 
 @st.cache_resource
 def load_model():
-    return tf.keras.models.load_model("satellite_model.h5")
+
+    model = tf.keras.models.load_model(
+        "satellite_model.h5",
+        compile=False
+    )
+
+    return model
 
 model = load_model()
 
@@ -129,7 +135,7 @@ class_names = [
 # IMAGE SIZE
 # =========================================================
 
-IMG_SIZE = 128
+IMG_SIZE = 224
 
 # =========================================================
 # HEADER
@@ -162,29 +168,43 @@ uploaded_file = st.file_uploader(
 
 def predict_image(img):
 
-    # Resize image
-    img = img.resize((IMG_SIZE, IMG_SIZE))
+    try:
 
-    # Convert to array
-    img_array = image.img_to_array(img)
+        # Resize image
+        img = img.resize((IMG_SIZE, IMG_SIZE))
 
-    # Expand dimensions
-    img_array = np.expand_dims(img_array, axis=0)
+        # Convert image to array
+        img_array = image.img_to_array(img)
 
-    # Normalize
-    img_array = img_array / 255.0
+        # Expand dimensions
+        img_array = np.expand_dims(img_array, axis=0)
 
-    # Predict
-    prediction = model.predict(
-        img_array,
-        verbose=0
-    )
+        # Normalize
+        img_array = img_array / 255.0
 
-    predicted_class = class_names[np.argmax(prediction)]
+        # Predict
+        prediction = model.predict(
+            img_array,
+            verbose=0
+        )
 
-    confidence = np.max(prediction) * 100
+        # Get class
+        predicted_class = class_names[
+            np.argmax(prediction)
+        ]
 
-    return prediction, predicted_class, confidence
+        # Confidence
+        confidence = np.max(prediction) * 100
+
+        return prediction, predicted_class, confidence
+
+    except Exception as e:
+
+        st.error("Prediction Error")
+
+        st.text(str(e))
+
+        return None, None, None
 
 # =========================================================
 # MAIN APP
@@ -192,71 +212,94 @@ def predict_image(img):
 
 if uploaded_file is not None:
 
-    # Safe image loading
-    img = Image.open(uploaded_file).convert("RGB")
+    try:
 
-    # Create columns
-    col1, col2 = st.columns([1,1])
+        # Load image safely
+        img = Image.open(uploaded_file).convert("RGB")
 
-    # =====================================================
-    # LEFT SIDE - IMAGE
-    # =====================================================
+        # Create columns
+        col1, col2 = st.columns([1,1])
 
-    with col1:
+        # =====================================================
+        # LEFT SIDE - IMAGE
+        # =====================================================
 
-        st.image(
-            img,
-            caption="Uploaded Satellite Image",
-            width=350
-        )
+        with col1:
 
-    # =====================================================
-    # RIGHT SIDE - PREDICTION
-    # =====================================================
+            st.image(
+                img,
+                caption="Uploaded Satellite Image",
+                width=350
+            )
 
-    with col2:
+        # =====================================================
+        # RIGHT SIDE - PREDICTION
+        # =====================================================
 
-        with st.spinner("Predicting Image..."):
+        with col2:
 
-            prediction, predicted_class, confidence = predict_image(img)
+            with st.spinner("Predicting Image..."):
 
-        st.markdown(
-            '<div class="prediction-card">',
-            unsafe_allow_html=True
-        )
+                prediction, predicted_class, confidence = predict_image(img)
 
-        st.subheader("Prediction Result")
+            # =================================================
+            # SHOW RESULT
+            # =================================================
 
-        st.success(f"Predicted Class: {predicted_class}")
+            if prediction is not None:
 
-        st.info(f"Confidence Score: {confidence:.2f}%")
+                st.markdown(
+                    '<div class="prediction-card">',
+                    unsafe_allow_html=True
+                )
 
-        st.progress(int(confidence))
+                st.subheader("Prediction Result")
 
-        st.markdown(
-            '</div>',
-            unsafe_allow_html=True
-        )
+                st.success(
+                    f"Predicted Class: {predicted_class}"
+                )
 
-    # =====================================================
-    # CONFIDENCE GRAPH
-    # =====================================================
+                st.info(
+                    f"Confidence Score: {confidence:.2f}%"
+                )
 
-    st.subheader("Prediction Confidence")
+                st.progress(int(confidence))
 
-    confidence_scores = prediction[0] * 100
+                st.markdown(
+                    '</div>',
+                    unsafe_allow_html=True
+                )
 
-    fig, ax = plt.subplots(figsize=(8,4))
+        # =====================================================
+        # CONFIDENCE GRAPH
+        # =====================================================
 
-    ax.bar(class_names, confidence_scores)
+        if prediction is not None:
 
-    plt.xticks(rotation=45)
+            st.subheader("Prediction Confidence")
 
-    plt.ylabel("Confidence (%)")
+            confidence_scores = prediction[0] * 100
 
-    plt.title("Prediction Confidence Scores")
+            fig, ax = plt.subplots(figsize=(8,4))
 
-    st.pyplot(fig)
+            ax.bar(
+                class_names,
+                confidence_scores
+            )
+
+            plt.xticks(rotation=45)
+
+            plt.ylabel("Confidence (%)")
+
+            plt.title("Prediction Confidence Scores")
+
+            st.pyplot(fig)
+
+    except Exception as e:
+
+        st.error("Image Upload Error")
+
+        st.text(str(e))
 
 # =========================================================
 # SIDEBAR
