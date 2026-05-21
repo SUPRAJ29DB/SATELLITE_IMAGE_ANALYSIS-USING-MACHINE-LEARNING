@@ -7,11 +7,19 @@ import matplotlib.pyplot as plt
 from tensorflow.keras.preprocessing import image
 from PIL import Image
 
+# =========================================================
+# PAGE CONFIG
+# =========================================================
+
 st.set_page_config(
     page_title="Satellite Image Classification",
     page_icon="🛰️",
     layout="wide"
 )
+
+# =========================================================
+# CUSTOM CSS
+# =========================================================
 
 st.markdown("""
 <style>
@@ -28,7 +36,7 @@ st.markdown("""
     color: white;
 }
 
-/* Main Title */
+/* Title */
 
 .main-title {
     font-size: 50px;
@@ -78,7 +86,7 @@ section[data-testid="stSidebar"] {
     margin-top: 50px;
 }
 
-/* Streamlit Button */
+/* Button */
 
 .stButton>button {
     background-color: #2563eb;
@@ -91,11 +99,19 @@ section[data-testid="stSidebar"] {
 </style>
 """, unsafe_allow_html=True)
 
+# =========================================================
+# LOAD MODEL
+# =========================================================
+
 @st.cache_resource
 def load_model():
     return tf.keras.models.load_model("satellite_model.h5")
 
 model = load_model()
+
+# =========================================================
+# CLASS NAMES
+# =========================================================
 
 class_names = [
     'AnnualCrop',
@@ -112,6 +128,10 @@ class_names = [
 
 IMG_SIZE = 224
 
+# =========================================================
+# HEADER
+# =========================================================
+
 st.markdown(
     '<div class="main-title">🛰️ Satellite Image Classification</div>',
     unsafe_allow_html=True
@@ -124,10 +144,18 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+# =========================================================
+# FILE UPLOADER
+# =========================================================
+
 uploaded_file = st.file_uploader(
     "Upload Satellite Image",
     type=["jpg", "jpeg", "png"]
 )
+
+# =========================================================
+# PREDICTION FUNCTION
+# =========================================================
 
 def predict_image(img):
 
@@ -147,16 +175,28 @@ def predict_image(img):
 
     return prediction, predicted_class, confidence, img_array
 
-def display_gradcam(img_array):
+# =========================================================
+# GRAD-CAM FUNCTION
+# =========================================================
 
+def generate_gradcam(img_array):
+
+    # Get base MobileNetV2 model
+    base_model = model.layers[0]
+
+    # Last convolution layer
+    last_conv_layer = base_model.get_layer("out_relu")
+
+    # Create Grad-CAM model
     grad_model = tf.keras.models.Model(
-        [model.inputs],
-        [
-            model.layers[0].get_layer("Conv_1").output,
+        inputs=model.inputs,
+        outputs=[
+            last_conv_layer.output,
             model.output
         ]
     )
 
+    # Compute gradients
     with tf.GradientTape() as tape:
 
         conv_outputs, predictions = grad_model(img_array)
@@ -165,38 +205,57 @@ def display_gradcam(img_array):
 
         class_channel = predictions[:, pred_index]
 
+    # Get gradients
     grads = tape.gradient(class_channel, conv_outputs)
 
+    # Mean intensity of gradients
     pooled_grads = tf.reduce_mean(
         grads,
-        axis=(0,1,2)
+        axis=(0, 1, 2)
     )
 
+    # Feature map
     conv_outputs = conv_outputs[0]
 
-    heatmap = conv_outputs @ pooled_grads[..., tf.newaxis]
+    # Heatmap
+    heatmap = tf.reduce_sum(
+        tf.multiply(pooled_grads, conv_outputs),
+        axis=-1
+    )
 
-    heatmap = tf.squeeze(heatmap)
-
+    # Normalize heatmap
     heatmap = np.maximum(heatmap, 0)
 
-    heatmap = heatmap / np.max(heatmap)
+    heatmap = heatmap / tf.math.reduce_max(heatmap)
 
     return heatmap.numpy()
 
+# =========================================================
+# MAIN APP
+# =========================================================
+
 if uploaded_file is not None:
+
+    # Safe image loading
+    img = Image.open(uploaded_file).convert("RGB")
 
     col1, col2 = st.columns([1,1])
 
-    with col1:
+    # =====================================================
+    # LEFT SIDE - IMAGE
+    # =====================================================
 
-        img = Image.open(uploaded_file).convert("RGB")
+    with col1:
 
         st.image(
             img,
-            caption="Uploaded Image",
-            use_container_width=True
+            caption="Uploaded Satellite Image",
+            width=400
         )
+
+    # =====================================================
+    # RIGHT SIDE - PREDICTION
+    # =====================================================
 
     with col2:
 
@@ -215,7 +274,14 @@ if uploaded_file is not None:
 
         st.progress(int(confidence))
 
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown(
+            '</div>',
+            unsafe_allow_html=True
+        )
+
+    # =====================================================
+    # CONFIDENCE GRAPH
+    # =====================================================
 
     st.subheader("Prediction Confidence")
 
@@ -233,68 +299,102 @@ if uploaded_file is not None:
 
     st.pyplot(fig)
 
+    # =====================================================
+    # GRAD-CAM HEATMAP
+    # =====================================================
+
     st.subheader("Grad-CAM Heatmap")
 
-    heatmap = display_gradcam(img_array)
+    try:
 
-    original = np.array(img.resize((IMG_SIZE, IMG_SIZE)))
+        heatmap = generate_gradcam(img_array)
 
-    heatmap = cv2.resize(
-        heatmap,
-        (IMG_SIZE, IMG_SIZE)
-    )
-
-    heatmap = np.uint8(255 * heatmap)
-
-    heatmap = cv2.applyColorMap(
-        heatmap,
-        cv2.COLORMAP_JET
-    )
-
-    superimposed_img = heatmap * 0.4 + original
-
-    fig2, ax2 = plt.subplots(figsize=(7,7))
-
-    ax2.imshow(
-        cv2.cvtColor(
-            np.uint8(superimposed_img),
-            cv2.COLOR_BGR2RGB
+        # Original image
+        original = np.array(
+            img.resize((IMG_SIZE, IMG_SIZE))
         )
-    )
 
-    ax2.axis("off")
+        # Resize heatmap
+        heatmap = cv2.resize(
+            heatmap,
+            (IMG_SIZE, IMG_SIZE)
+        )
 
-    st.pyplot(fig2)
+        # Convert heatmap
+        heatmap = np.uint8(255 * heatmap)
+
+        # Apply color map
+        heatmap = cv2.applyColorMap(
+            heatmap,
+            cv2.COLORMAP_JET
+        )
+
+        # Overlay
+        superimposed_img = heatmap * 0.4 + original
+
+        # Display
+        fig2, ax2 = plt.subplots(figsize=(7,7))
+
+        ax2.imshow(
+            cv2.cvtColor(
+                np.uint8(superimposed_img),
+                cv2.COLOR_BGR2RGB
+            )
+        )
+
+        ax2.axis("off")
+
+        st.pyplot(fig2)
+
+    except Exception as e:
+
+        st.error(
+            "Grad-CAM visualization could not be generated."
+        )
+
+        st.text(str(e))
+
+# =========================================================
+# SIDEBAR
+# =========================================================
 
 st.sidebar.title("📌 Project Information")
 
 st.sidebar.markdown("""
 ### Features
-✅ Satellite Image Classification
-✅ Deep Learning Prediction
-✅ Confidence Score
-✅ Grad-CAM Heatmap
-✅ MobileNetV2 Transfer Learning
+
+✅ Satellite Image Classification  
+✅ Deep Learning Prediction  
+✅ Confidence Score  
+✅ Grad-CAM Heatmap  
+✅ MobileNetV2 Transfer Learning  
 
 ---
 
 ### Dataset
+
 EuroSAT RGB Dataset
 
 ---
 
 ### Technologies Used
+
 - TensorFlow
 - Streamlit
 - OpenCV
-- Matplotlib
 - MobileNetV2
+- Matplotlib
 
 ---
 
 ### Model
+
 Transfer Learning Based CNN
 """)
+
+# =========================================================
+# FOOTER
+# =========================================================
 
 st.markdown(
     '<div class="footer">'
